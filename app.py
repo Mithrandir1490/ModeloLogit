@@ -1,38 +1,44 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import subprocess
+import os
+import time
 
-# Configuración de la página institucional
+# ==========================================================================
+# 1. CONFIGURACIÓN CORPORATIVA E INSTITUCIONAL (SALA DE TRADING)
+# ==========================================================================
 st.set_page_config(
-    page_title="SBS Quant Lab - Motor Logit",
+    page_title="SBS Quant Lab - Motor Logit v2.0",
     page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Estilos CSS personalizados para la sala de trading
+# Estilos CSS premium unificados para la sala de trading de Isengard
 st.markdown("""
     <style>
     .metric-card {
-        background-color: #f7fafc;
-        padding: 15px;
-        border-radius: 5px;
-        border-left: 5px solid #2b6cb0;
-        margin-bottom: 10px;
+        background-color: #f8fafc;
+        padding: 18px;
+        border-radius: 6px;
+        border-left: 5px solid #1e3a8a;
+        margin-bottom: 12px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
     .top10-container {
-        background-color: #fffaf0;
-        padding: 20px;
-        border-radius: 6px;
-        border: 1px solid #feebc8;
-        border-left: 6px solid #dd6b20;
+        background-color: #fffbf5;
+        padding: 22px;
+        border-radius: 8px;
+        border: 1px solid #fed7aa;
+        border-left: 6px solid #ea580c;
         margin-bottom: 25px;
     }
     .ticker-badge {
-        background-color: #2b6cb0;
+        background-color: #1e3a8a;
         color: white;
-        padding: 3px 8px;
-        border-radius: 3px;
+        padding: 4px 10px;
+        border-radius: 4px;
         font-weight: bold;
         font-family: monospace;
     }
@@ -40,26 +46,73 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🧠 SBS Center - Laboratorio Analítico de Valuación Logit")
+st.caption("Ecosistema Cuantitativo 'The One Ring' | Módulo 4: Análisis de Múltiplos por Regresión Estructural")
 st.markdown("---")
 
-# Carga segura de las bases de datos optimizadas generadas por la nube
-@st.cache_data
-def cargar_datos():
+# ==========================================================================
+# 2. SISTEMA DE CONTROL DE CACHÉ DINÁMICO POR MUTACIÓN DE ARCHIVO
+# ==========================================================================
+def get_file_timestamp(filepath):
+    """Devuelve el timestamp de la última modificación para romper el caché automáticamente."""
+    if os.path.exists(filepath):
+        return os.path.getmtime(filepath)
+    return 0.0
+
+# El caché se invalida por completo si el archivo físico en el servidor muta o cambia de tamaño
+@st.cache_data(ttl=600)
+def cargar_datos(ts_clean, ts_vetadas):
     try:
-        df_clean = pd.read_csv("logit_data.csv")
-        df_vetadas = pd.read_csv("vetados_quality.csv")
+        df_clean = pd.read_csv("logit_data.csv") if os.path.exists("logit_data.csv") else None
+        df_vetadas = pd.read_csv("vetados_quality.csv") if os.path.exists("vetados_quality.csv") else None
         return df_clean, df_vetadas
     except Exception as e:
-        st.error(f"Error al cargar las bases de datos: {e}")
+        st.error(f"Error de lectura actuarial en bases de datos: {e}")
         return None, None
 
-df_clean, df_vetadas = cargar_datos()
+# Obtener marcas de tiempo vivas antes de llamar al cargador
+ts_clean = get_file_timestamp("logit_data.csv")
+ts_vetadas = get_file_timestamp("vetados_quality.csv")
+df_clean, df_vetadas = cargar_datos(ts_clean, ts_vetadas)
 
+# ==========================================================================
+# 3. BARRA LATERAL: PANEL DE SINCRONIZACIÓN Y FILTROS INTEGRADOS
+# ==========================================================================
+with st.sidebar:
+    st.header("🔄 Control Operativo")
+    st.info("Módulo de sincronización remota de Isengard. Utiliza este control si los datos de los lunes por la mañana no se actualizan en la apertura.")
+    
+    # INTERRUPTOR MAESTRO: Manda llamar al extractor optimizado directamente en el servidor cloud
+    if st.button("🚀 Forzar Ingesta y Recálculo Logit", use_container_width=True):
+        with st.spinner("Triturando vectores fundamentales en extractor_sbs.py..."):
+            try:
+                # Ejecución nativa del proceso hermano de alta velocidad
+                resultado = subprocess.run(["python", "extractor_sbs.py"], capture_output=True, text=True, timeout=120)
+                if resultado.returncode == 0:
+                    st.success("¡Base de datos unificada y actualizada con éxito!")
+                    time.sleep(1)
+                    st.cache_data.clear()  # Purga total de la memoria RAM del servidor
+                    st.rerun()             # Refresco forzoso de la interfaz
+                else:
+                    st.error("El extractor falló en la compilación estructural.")
+                    st.code(resultado.stderr)
+            except subprocess.TimeoutExpired:
+                st.error("Exceso de tiempo en la consulta remota de red.")
+            except Exception as e:
+                st.error(f"Error crítico de subproceso: {e}")
+                
+    st.divider()
+    st.header("📊 Filtros de Exploración")
+    if df_clean is not None:
+        categorias_disponibles = ["Todos"] + list(sorted(df_clean["Clasificacion"].unique()))
+        categoria_sel = st.selectbox("Filtrar Universo General por Convicción:", categorias_disponibles)
+    else:
+        categoria_sel = "Todos"
+
+# ==========================================================================
+# 4. DESPLIEGUE EXECUTIVO: SECCIÓN DE ALTA CONVICCIÓN SBS
+# ==========================================================================
 if df_clean is not None:
     
-    # ======================================================================
-    # 🔥 SECCIÓN EXCLUSIVA: EL TOP 10 DE CONVICCIÓN CUANTITATIVA SBS
-    # ======================================================================
     st.markdown("<div class='top10-container'>", unsafe_allow_html=True)
     st.subheader("🔥 El Top 10 de Convicción Absoluta SBS (Selección de Capital Eficiente)")
     st.markdown("""
@@ -77,45 +130,44 @@ if df_clean is not None:
             ascending=[False, False]
         ).head(10)
         
-        # Formatear la tabla del Top 10 para los usuarios finales
+        # Formatear la tabla del Top 10 para despliegue ejecutivo
         df_top10_display = df_top10.copy()
-        df_top10_display["Probabilidad_Logit"] = df_top10_display["Probabilidad_Logit"].map(lambda x: f"{x*100:.2f}%")
-        df_top10_display["FCF_Yield"] = df_top10_display["FCF_Yield"].map(lambda x: f"{x*100:.2f}%")
-        df_top10_display["Percentil_PE_24M"] = df_top10_display["Percentil_PE_24M"].map(lambda x: f"{x*100:.1f}%")
-        df_top10_display["ROIC"] = df_top10_display["ROIC"].map(lambda x: f"{x*100:.1f}%")
         
-        # Desplegar los 10 ganadores de forma simplificada y directa
-        st.dataframe(df_top10_display[[
-            "Ticker", "Clasificacion", "Probabilidad_Logit", "PE_Actual", 
-            "Percentil_PE_24M", "FCF_Yield", "ROIC"
-        ]], use_container_width=True, hide_index=True)
+        def color_gangas(row):
+            return ['background-color: #f0fff4; color: #166534; font-weight: bold;' if row["Clasificacion"] == "💎 GANGA" else '' for _ in row]
+
+        styled_top10 = (df_top10_display[["Ticker", "Clasificacion", "Probabilidad_Logit", "PE_Actual", "Percentil_PE_24M", "FCF_Yield", "ROIC"]]
+                        .style.apply(color_gangas, axis=1)
+                        .format({
+                            "Probabilidad_Logit": lambda x: f"{x*100:.2f}%" if isinstance(x, float) else x,
+                            "FCF_Yield": lambda x: f"{x*100:.2f}%" if isinstance(x, float) else x,
+                            "Percentil_PE_24M": lambda x: f"{x*100:.1f}%" if isinstance(x, float) else x,
+                            "ROIC": lambda x: f"{x*100:.1f}%" if isinstance(x, float) else x,
+                            "PE_Actual": "{:.2f}v"
+                        }))
+        
+        st.dataframe(styled_top10, use_container_width=True, height=380, hide_index=True)
     else:
         st.info("🎯 El mercado se encuentra cotizando en rangos de valuación justos o elevados. No hay activos en zona de estrés o descuento que activen el Top 10 actualmente.")
         
     st.markdown("</div>", unsafe_allow_html=True)
-    # ======================================================================
-
-    # --- BARRA LATERAL: PANEL DE FILTROS ---
-    st.sidebar.header("📊 Filtros de Exploración")
-    categorias_disponibles = ["Todos"] + list(df_clean["Clasificacion"].unique())
-    categoria_sel = st.sidebar.selectbox("Filtrar Universo General por Convicción:", categorias_disponibles)
-    
-    if categoria_sel != "Todos":
-        df_filtrado = df_clean[df_clean["Clasificacion"] == categoria_sel]
-    else:
-        df_filtrado = df_clean
 
     # --- MÉTRICAS DE ESCALAFÓN GLOBAL ---
+    n_clean = len(df_clean)
+    n_vetadas = len(df_vetadas) if df_vetadas is not None else 0
+    total_universo = n_clean + n_vetadas
+    
     col_m1, col_m2, col_m3, col_m4 = st.columns(4)
     with col_m1:
-        st.metric("Universo Analizado", len(df_clean) + len(df_vetadas))
+        st.metric("Universo Analizado", total_universo)
     with col_m2:
-        st.metric("Aprobadas por Calidad", len(df_clean), delta=f"{len(df_clean)/(len(df_clean)+len(df_vetadas))*100:.1f}%")
+        pct_aprobadas = (n_clean / total_universo * 100) if total_universo > 0 else 0.0
+        st.metric("Aprobadas por Calidad", n_clean, delta=f"{pct_aprobadas:.1f}%")
     with col_m3:
         gangas_count = len(df_clean[df_clean["Clasificacion"] == "💎 GANGA"])
         st.metric("GANGAS en el Radar", gangas_count, delta="Horizonte 90 Días", delta_color="inverse")
     with col_m4:
-        st.metric("Vetadas por Riesgo", len(df_vetadas))
+        st.metric("Vetadas por Riesgo", n_vetadas)
 
     # --- DISEÑO DE PESTAÑAS ANALÍTICAS ---
     tab_modelo, tab_buscador, tab_auditoria = st.tabs([
@@ -134,17 +186,20 @@ if df_clean is not None:
         st.bar_chart(resumen_cat)
         
         st.subheader(f"Listado de Activos Filtrados: {categoria_sel}")
+        df_filtrado = df_clean if categoria_sel == "Todos" else df_clean[df_clean["Clasificacion"] == categoria_sel]
         df_display = df_filtrado.copy()
-        df_display["Probabilidad_Logit"] = df_display["Probabilidad_Logit"].map(lambda x: f"{x*100:.2f}%")
-        df_display["Percentil_PE_24M"] = df_display["Percentil_PE_24M"].map(lambda x: f"{x*100:.1f}%")
-        df_display["FCF_Yield"] = df_display["FCF_Yield"].map(lambda x: f"{x*100:.2f}%")
-        df_display["Margen_Bruto"] = df_display["Margen_Bruto"].map(lambda x: f"{x*100:.1f}%")
-        df_display["ROIC"] = df_display["ROIC"].map(lambda x: f"{x*100:.1f}%")
         
-        st.dataframe(df_display[[
-            "Ticker", "Clasificacion", "Probabilidad_Logit", "PE_Actual", 
-            "Percentil_PE_24M", "Z_Score_PE", "FCF_Yield", "Margen_Bruto", "ROIC"
-        ]], use_container_width=True, hide_index=True)
+        styled_general = (df_display[["Ticker", "Clasificacion", "Probabilidad_Logit", "PE_Actual", "Percentil_PE_24M", "Z_Score_PE", "FCF_Yield", "Margen_Bruto", "ROIC"]]
+                          .style.format({
+                              "Probabilidad_Logit": lambda x: f"{x*100:.2f}%",
+                              "Percentil_PE_24M": lambda x: f"{x*100:.1f}%",
+                              "FCF_Yield": lambda x: f"{x*100:.2f}%",
+                              "Margen_Bruto": lambda x: f"{x*100:.1f}%",
+                              "ROIC": lambda x: f"{x*100:.1f}%",
+                              "PE_Actual": "{:.2f}v",
+                              "Z_Score_PE": "{:.2f}"
+                          }))
+        st.dataframe(styled_general, use_container_width=True, height=500, hide_index=True)
 
     # PESTAÑA 2: BUSCADOR QUIRÚRGICO DE TICKERS (REPORTE DE AUDITORÍA)
     with tab_buscador:
@@ -168,15 +223,15 @@ if df_clean is not None:
             with col_f1:
                 st.write("**Métricas de Valuación Crítica (Fuerza del Algoritmo):**")
                 st.info(f"📍 **Percentil Móvil P/E (24 Meses):** {row['Percentil_PE_24M']*100:.1f}% (0% es mínimo histórico; 100% techo de ciclo corto).")
-                st.info(f"📍 **Z-Score del P/E:** {row['Z_Score_PE']:.2f} desviaciones estándar.")
-                st.info(f"📍 **Free Cash Flow Yield:** {row['FCF_Yield']*100:.2f}% de rendimiento de efectivo.")
+                st.info(f"📍 **Z-Score del P/E:** {row['Z_Score_PE']:.2f} desviaciones estándar respecto a su media.")
+                st.info(f"📍 **Free Cash Flow Yield:** {row['FCF_Yield']*100:.2f}% de rendimiento de efectivo disponible.")
             
             with col_f2:
                 st.write("**Métricas de Calidad Estructural e Impulso:**")
                 st.success(f"📈 **Margen Bruto:** {row['Margen_Bruto']*100:.1f}%")
                 st.success(f"📈 **Aceleración Trimestral de Margen Bruto ($\Delta$):** {row['Delta_Margen_Bruto']*100:.2f}%")
                 st.success(f"📈 **Eficiencia Sostenida (ROIC):** {row['ROIC']*100:.1f}%")
-                st.success(f"📈 **Cobertura de Intereses de Deuda:** {row['Cobertura_Interes']:.1f}x")
+                st.info(f"📈 **Cobertura de Intereses de Deuda:** {row['Cobertura_Interes']:.1f}x")
 
     # PESTAÑA 3: LA LISTA NEGRA DE CONTROL DE RIESGOS (AUDITORÍA ACTUARIAL)
     with tab_auditoria:
@@ -186,15 +241,14 @@ if df_clean is not None:
             Abajo se detallan los activos bloqueados y la **métrica exacta que provocó su exclusión** para asegurar la calidad de las entradas.
         """)
         
-        razones_disponibles = ["Todas"] + list(df_vetadas["Razón"].unique())
-        razon_sel = st.selectbox("Filtrar por Razón de Rechazo:", razones_disponibles)
-        
-        if razon_sel != "Todas":
-            df_vetadas_filt = df_vetadas[df_vetadas["Razón"] == razon_sel]
-        else:
-            df_vetadas_filt = df_vetadas
+        if df_vetadas is not None and not df_vetadas.empty:
+            razones_disponibles = ["Todas"] + list(df_vetadas["Razón"].unique())
+            razon_sel = st.selectbox("Filtrar por Razón de Rechazo:", razones_disponibles)
             
-        st.dataframe(df_vetadas_filt, use_container_width=True, hide_index=True)
+            df_vetadas_filt = df_vetadas if razon_sel == "Todas" else df_vetadas[df_vetadas["Razón"] == razon_sel]
+            st.dataframe(df_vetadas_filt, use_container_width=True, height=450, hide_index=True)
+        else:
+            st.info("Felicidades. Ningún activo del universo ha sido vetado bajo los parámetros sanitarios actuales.")
 
 else:
-    st.warning("⚠️ No se encontraron las bases de datos. El Action en GitHub debe completar su ejecución para poblar el modelo.")
+    st.warning("⚠️ No se encontraron las bases de datos locales. Presiona el botón 'Forzar Ingesta y Recálculo Logit' en la barra lateral para poblar el modelo por primera vez.")
