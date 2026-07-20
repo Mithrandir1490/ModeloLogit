@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 import time
-import random
 import os
 from datetime import datetime
 
@@ -45,22 +44,23 @@ UMBRAL_MARGEN_BRUTO_SEMIS = 0.15
 SECTOR_HARDWARE_SEMIS = ["NVDA", "AMD", "TSM", "AVGO", "MU", "ASML", "LRCX", "AMAT", "KLAC", "INTC", "TXN", "ADI", "LAM", "SMCI", "QCOM"]
 
 def ejecutar_pipeline_cuantitativo():
-    """Descarga, filtra y procesa los 150 tickers bajo la matriz Logit en menos de 30 segundos."""
+    """Descarga, filtra y procesa los 150 tickers garantizando la captura en tiempo real."""
     aprobadas, vetadas = [], []
-    fecha_hoy_str = datetime.today().strftime('%Y-%m-%d')
+    fecha_hoy_str = datetime.today().strftime('%Y-%m-%d %H:%M')
     
-    # Descarga vectorizada de alta velocidad
+    # Ingesta masiva optimizada
     try:
         precios_bloque = yf.download(UNIVERSO_TICKERS, period="2y", interval="1d", group_by='ticker', progress=False)
-    except:
+    except Exception:
         precios_bloque = None
 
     for ticker in UNIVERSO_TICKERS:
-        time.sleep(0.05)  # Micro-delay preventivo
+        time.sleep(0.02)  # Latencia mínima anti-bloqueo
         try:
             t = yf.Ticker(ticker)
             info = t.info
             
+            # Comprobación de datos históricos frescos
             if precios_bloque is not None and ticker in precios_bloque.columns.levels[0]:
                 history_2y = precios_bloque[ticker].dropna()
             else:
@@ -73,7 +73,6 @@ def ejecutar_pipeline_cuantitativo():
             margen_bruto = info.get("grossMargins", 0.0) or 0.0
             margen_neto = info.get("profitMargins", 0.0) or 0.0
             roe = info.get("returnOnEquity", 0.0) or 0.0
-            ebit = info.get("operatingMargins", 0.0) * info.get("totalRevenue", 1.0) if info.get("operatingMargins") else 0.0
             roic = info.get("returnOnAssets", 0.0) or roe or 0.0
             cobertura_interes = 999.0
             
@@ -90,7 +89,11 @@ def ejecutar_pipeline_cuantitativo():
             fcf_yield = (info.get("freeCashflow", 0.0) / info.get("marketCap", 1.0)) if info.get("marketCap", 1.0) > 0 else 0.0
             
             close_prices = history_2y['Close'].resample('ME').last()
-            pe_series = [pe_actual * (p / close_prices.iloc[-1]) for p in close_prices]
+            
+            if not close_prices.empty and close_prices.iloc[-1] > 0:
+                pe_series = [pe_actual * (p / close_prices.iloc[-1]) for p in close_prices]
+            else:
+                pe_series = [pe_actual]
             
             p20_pe = np.percentile(pe_series, 20) if pe_series else 0.0
             p80_pe = np.percentile(pe_series, 80) if pe_series else 1.0
@@ -101,6 +104,7 @@ def ejecutar_pipeline_cuantitativo():
             x_pe_percentil = max(0.0, min(1.0, x_pe_percentil))
             z_pe = (pe_actual - mean_pe) / std_pe
             
+            # Modelo Logit de Regresión
             score_z = 1.8 - 3.5 * x_pe_percentil - 1.2 * z_pe + 2.0 * fcf_yield
             probabilidad = 1 / (1 + np.exp(-score_z))
             
@@ -119,14 +123,15 @@ def ejecutar_pipeline_cuantitativo():
                 "Probabilidad_Logit": probabilidad, "Clasificacion": categoria,
                 "Ultima_Actualizacion": fecha_hoy_str
             })
-        except:
+        except Exception:
             continue
 
     if aprobadas: pd.DataFrame(aprobadas).to_csv("logit_data.csv", index=False)
     if vetadas: pd.DataFrame(vetadas).to_csv("vetados_quality.csv", index=False)
+    return pd.DataFrame(aprobadas), pd.DataFrame(vetadas)
 
 # ==========================================================================
-# 2. INTERFAZ GRÁFICA PREMIUM EN STREAMLIT
+# 2. INTERFAZ GRÁFICA EN STREAMLIT
 # ==========================================================================
 st.set_page_config(page_title="SBS Quant Lab - Logit Unificado", page_icon="🧠", layout="wide", initial_sidebar_state="expanded")
 
@@ -144,34 +149,35 @@ st.markdown("---")
 def get_file_timestamp(filepath):
     return os.path.getmtime(filepath) if os.path.exists(filepath) else 0.0
 
-@st.cache_data(ttl=600)
-def cargar_datos(ts_clean, ts_vetadas):
+# FORZAMOS LA EXPIRACIÓN MÁXIMA DEL CACHÉ EN 1 HORA (TTL=3600)
+@st.cache_data(ttl=3600)
+def cargar_datos_cache(ts_clean, ts_vetadas):
     df_clean = pd.read_csv("logit_data.csv") if os.path.exists("logit_data.csv") else None
     df_vetadas = pd.read_csv("vetados_quality.csv") if os.path.exists("vetados_quality.csv") else None
     return df_clean, df_vetadas
 
 ts_clean = get_file_timestamp("logit_data.csv")
 ts_vetadas = get_file_timestamp("vetados_quality.csv")
-df_clean, df_vetadas = cargar_datos(ts_clean, ts_vetadas)
+df_clean, df_vetadas = cargar_datos_cache(ts_clean, ts_vetadas)
 
-# BARRA LATERAL CON PROCESAMIENTO INTERNO EN VIVO
+# BARRA LATERAL
 with st.sidebar:
     st.header("🔄 Control de Ingesta")
-    st.write(f"Último cálculo físico: {datetime.fromtimestamp(ts_clean).strftime('%Y-%m-%d %H:%M') if ts_clean > 0 else 'Ninguno'}")
+    st.write(f"Último cálculo en disco: {datetime.fromtimestamp(ts_clean).strftime('%Y-%m-%d %H:%M') if ts_clean > 0 else 'Ninguno'}")
     
     if st.button("🚀 Ejecutar Algoritmo en Tiempo Real", use_container_width=True):
         with st.spinner("Triturando estados financieros y cotizaciones de apertura..."):
-            ejecutar_pipeline_cuantitativo()
-            st.success("¡Matriz recalculada exitosamente!")
+            df_clean, df_vetadas = ejecutar_pipeline_cuantitativo()
             st.cache_data.clear()
+            st.success("¡Matriz recalculada exitosamente!")
             st.rerun()
             
     st.divider()
     st.header("📊 Filtros")
     categoria_sel = st.selectbox("Filtrar Universo General por Convicción:", ["Todos"] + list(sorted(df_clean["Clasificacion"].unique()))) if df_clean is not None else "Todos"
 
-# DESPLIEGUE GENERAL DE LA SALA DE TRADING
-if df_clean is not None:
+# DESPLIEGUE EN PANTALLA
+if df_clean is not None and not df_clean.empty:
     st.markdown("<div class='top10-container'>", unsafe_allow_html=True)
     st.subheader("🔥 El Top 10 de Convicción Absoluta SBS (Selección de Capital Eficiente)")
     
@@ -220,4 +226,4 @@ if df_clean is not None:
             razon_sel = st.selectbox("Filtrar Rechazo:", ["Todas"] + list(df_vetadas["Razón"].unique()))
             st.dataframe(df_vetadas if razon_sel == "Todas" else df_vetadas[df_vetadas["Razón"] == razon_sel], use_container_width=True, hide_index=True)
 else:
-    st.warning("⚠️ Sin base de datos local. Presiona el botón de la barra lateral para calcular el modelo por primera vez.")
+    st.warning("⚠️ No se detectaron archivos de datos recientes. Haz clic en el botón '🚀 Ejecutar Algoritmo en Tiempo Real' en la barra lateral para generar la primera matriz.")
