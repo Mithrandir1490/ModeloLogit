@@ -2,34 +2,49 @@ name: Actualizacion Automatica Tablero Logit
 
 on:
   schedule:
-    # Lunes a viernes a las 21:00 UTC (15:00 CDMX, justo tras el cierre de Wall Street)
+    # Lunes a viernes a las 21:00 UTC (15:00 CDMX / 17:00 ET)
     - cron: '0 21 * * 1-5'
-  workflow_dispatch: # Botón para dispararlo manualmente cuando tú quieras
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Clonar Repositorio
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Configurar Python
-        uses: setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Instalar Dependencias
         run: |
+          python -m pip install --upgrade pip
           pip install pandas numpy yfinance streamlit
 
       - name: Ejecutar Extractor y Recálculo
         run: |
-          python -c "import app; app.obtener_datos_actualizados()"
+          python -c "
+          import glob, os, importlib
+          candidatos = ['app.py', 'streamlit_app.py', 'main.py'] + glob.glob('*.py')
+          modulo_nombre = None
+          for c in candidatos:
+              if os.path.exists(c) and 'test' not in c:
+                  modulo_nombre = c.replace('.py', '')
+                  break
+          print(f'Importando módulo principal: {modulo_nombre}')
+          mod = importlib.import_module(modulo_nombre)
+          mod.obtener_datos_actualizados()
+          "
 
       - name: Guardar y Hacer Push a GitHub
         run: |
-          git config --global user.name "SBS Quant Bot"
-          git config --global user.email "bot@sbsquant.com"
-          git add tablero_export_auto.csv logit_data.csv vetados_quality.csv
-          git commit -m "Auto-actualización Tablero y Logit [skip ci]" || echo "Sin cambios nuevos"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Auto-actualizacion Tablero y Logit [skip ci]" || echo "Sin cambios detectados"
           git push
