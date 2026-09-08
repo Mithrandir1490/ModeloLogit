@@ -1,15 +1,17 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import yfinance as yf
 import os
 import glob
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 
 # ==============================================================================
-# CONFIGURACIÓN Y ESTILOS DE LA PLATAFORMA
+# CONFIGURACIÓN DE LA PÁGINA
 # ==============================================================================
 st.set_page_config(
-    page_title="SBS Quant Lab - Logit Master v3.0",
+    page_title="SBS Quant Lab - Logit Autónomo",
     page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -17,13 +19,6 @@ st.set_page_config(
 
 st.markdown("""
     <style>
-    .metric-card {
-        background-color: #f8fafc;
-        padding: 16px;
-        border-radius: 8px;
-        border-left: 5px solid #1e3a8a;
-        margin-bottom: 12px;
-    }
     .top15-box {
         background-color: #f0fdf4;
         padding: 20px;
@@ -36,74 +31,149 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# CONSTANTES Y PARÁMETROS DEL MODELO CUANTITATIVO
+# UNIVERSO Y PARÁMETROS DEL TABLERO MÁXIMO
 # ==============================================================================
+UNIVERSO_TICKERS = [
+    "ADYEN.AS", "UBER", "ADP", "DSY.PA", "UNH", "TEM", "OSCR", "HIMS", "DECK", "ADBE", 
+    "ACN", "DLO", "FDS", "WKL.AS", "LULU", "NVO", "GEV", "BE", "VRT", "CEG", 
+    "NEE", "SRE", "VST", "V", "MA", "MCO", "SPGI", "ISRG", "AXON", "ABNB", 
+    "ANET", "BSX", "TTD", "NOW", "CRM", "SCHW", "BLK", "GS", "XOM", "CVX", 
+    "CAT", "DE", "FIX", "ETN", "HON", "WM", "SMCI", "ALAB", "CORT", "ONTO", 
+    "AX", "VIV", "GHM", "SLAB", "LSCC", "LASR", "SITM", "MCHP", "MRVL", "BAM", 
+    "DHR", "QSR", "BABA", "GE", "CPNG", "EXPE", "ROK", "ZBRA", "CGNX", "PATH", 
+    "PEGA", "MDT", "PRCT", "OMCL", "SYK", "TER", "LECO", "OII", "FARO", "PTC", 
+    "QCOM", "AVAV", "TDY", "KTOS", "NOC", "GD", "RTX", "LHX", "APP", "IREN", 
+    "AMAT", "KLAC", "RMBS", "SIMO", "ARM", "SNPS", "CRDO", "GLW", "AMKR", "PWR", 
+    "CCJ", "BWXT", "UUUU", "TMQ", "UAMY", "MP", "FCX", "TECK", "SCCO", "IONQ", 
+    "RGTI", "COIN", "SPOT", "DDOG", "RXRX", "POET", "RBLX", "CRCL", "BMNR", "ACHR", 
+    "BEAM", "MOH", "ENB", "TOST", "AMGN", "FOX", "UTHR", "GOLD", "WBA", "JNJ", 
+    "HD", "ABBV", "O", "BLDR", "TPL", "FICO", "DPZ", "URI", "BKNG", "MNST", 
+    "WDAY", "SOFI", "NU", "NVDA", "AMD", "TSM", "AVGO", "MU", "ASML", "LRCX", 
+    "PANW", "CRWD", "FTNT", "ZS", "OKTA", "SNOW", "PLTR", "LLY", "VRTX", "REGN", 
+    "AAPL", "MSFT", "GOOGL", "META", "AMZN", "MARA", "RIOT", "WMT", "TGT", "COST", 
+    "NFLX", "TSLA", "PYPL", "SHOP", "SE", "IBM", "QBTS", "ONDS", "MVST", "ASTS", 
+    "NBIS", "RKLB", "FSLR", "EC", "PL", "BA", "SATS", "IRDM", "RDW", "LIN", 
+    "GFS", "COHR", "LITE", "INTC", "GENB", "OUST", "PRME", "RVMD", "NXP", "TXN", 
+    "ADI", "LAM", "CBRS", "OSS", "PENG", "STRL", "ZETA", "CSCO", "AXTI", "SNDK", 
+    "RDDT", "LUNR", "LLAP", "VIAV", "AEVA", "SPIR", "ARQQ", "LAZR", "MTSI", "GILT", 
+    "SALT", "TWST", "CLSK", "LEU", "SMR", "ZTS", "AAOI", "OKLO", "VPG", "SYM", 
+    "INFQ", "USAR", "ROKU", "CRSP", "INSM", "UI", "APLD", "VSAT", "PGY", "BETR", 
+    "TMC", "LTBR", "GRAL", "OPEN", "CIFR", "NVTS"
+]
+
 EXCLUIR_TICKERS = [
     'BTC-USD', 'ETH-USD', 'CONL', 'SOXL', 'LABU', 'MARA', 'CLSK', 'CIFR', 
     'IREN', 'RGTI', 'QBTS', 'POET', 'OPEN', 'BETR', 'MVST', 'UAMY', 'TMQ', 
     'SMR', 'LTBR'
 ]
 
-UMBRAL_MARGEN_OP_MIN  = 12.0   # Mínimo 12% de Margen Operativo
-UMBRAL_CREC_VENTAS_MIN = 5.0   # Mínimo 5% de Crecimiento en Ventas
-UMBRAL_CREC_EPS_MIN    = 0.0   # No contracción de utilidades
-UMBRAL_UPSIDE_MIN      = 5.0   # Mínimo 5% de upside según consenso
-PRECIO_MINIMO          = 15.0  # Filtro anti-penny stocks
-
-# Ponderaciones de la Regresión Logística Multivariada
-BETA_0 =  0.20   # Intercepto
-BETA_1 = -1.50   # Factor PEG Ratio (Menor es mejor)
+# Pesos del Modelo Logit
+BETA_0 =  0.20
+BETA_1 = -1.50   # Factor PEG (Menor es mejor)
 BETA_2 =  1.20   # Factor Margen Operativo % (Mayor es mejor)
 BETA_3 =  1.10   # Factor Crecimiento Ventas % (Mayor es mejor)
-BETA_4 = -0.90   # Factor Descuento vs Máximo % (Mayor caída relativa suma)
+BETA_4 = -0.90   # Factor Dif % vs Max (Mayor caída suma)
 BETA_5 =  1.30   # Factor Upside Wall Street % (Mayor es mejor)
 
+CSV_MAESTRO = "tablero_export_auto.csv"
+
 # ==============================================================================
-# MOTOR MATEMÁTICO: INGESTA Y PROCESAMIENTO
+# MOTOR DE DESCARGA AUTÓNOMO (CREA EL EXPORT SI NO EXISTE O ESTÁ VIEJO)
 # ==============================================================================
-def buscar_archivo_export():
-    """Localiza el archivo de exportación más reciente generado por el Tablero."""
-    archivos = glob.glob("*export*.csv")
-    if not archivos:
-        return None
-    archivos.sort(key=os.path.getmtime, reverse=True)
-    return archivos[0]
+def construir_tablero_maximo_autonomo():
+    """Descarga datos frescos de yfinance y construye el DataFrame idéntico al Tablero Máximo."""
+    registros = []
+    
+    # 1. Ingesta masiva de precios históricos (1 año para calcular el máximo de 52 semanas)
+    try:
+        data_hist = yf.download(UNIVERSO_TICKERS, period="1y", interval="1d", group_by='ticker', progress=False)
+    except Exception:
+        data_hist = None
 
-@st.cache_data(ttl=1800)
-def procesar_modelo_logit(ruta_csv):
-    """Procesa las 2 etapas del modelo cuantitativo: filtros sanitarios y regresión."""
-    if not ruta_csv or not os.path.exists(ruta_csv):
-        return None, None
+    for sym in UNIVERSO_TICKERS:
+        try:
+            tk = yf.Ticker(sym)
+            inf = tk.info
+            
+            # Obtener serie de precios
+            if data_hist is not None and sym in data_hist.columns.levels[0]:
+                df_sym = data_hist[sym].dropna()
+            else:
+                df_sym = tk.history(period="1y")
 
-    df_raw = pd.read_csv(ruta_csv)
+            if df_sym.empty:
+                continue
 
-    # 1. Filtro Sanitario de Exclusión (Anti-Value Traps)
-    vetadas = []
-    aprobadas_idx = []
+            precio_act = float(df_sym['Close'].iloc[-1])
+            max_52w = float(df_sym['High'].max())
+            dif_vs_max = ((precio_act - max_52w) / max_52w) * 100.0 if max_52w > 0 else 0.0
+
+            # Extracción de variables financieras
+            nombre = inf.get("shortName", sym)
+            sector = inf.get("sector", "Tecnología")
+            margen_op = (inf.get("operatingMargins", 0.0) or 0.0) * 100.0
+            crec_ventas = (inf.get("revenueGrowth", 0.0) or 0.0) * 100.0
+            crec_eps = (inf.get("earningsGrowth", 0.0) or 0.0) * 100.0
+            pe_act = inf.get("forwardPE", inf.get("trailingPE", 0.0)) or 0.0
+            peg = inf.get("pegRatio", np.nan)
+            target_ws = inf.get("targetMeanPrice", precio_act) or precio_act
+            upside_b5 = ((target_ws - precio_act) / precio_act) * 100.0 if precio_act > 0 else 0.0
+
+            registros.append({
+                "Ticker": sym,
+                "Nombre": nombre,
+                "Sector": sector,
+                "Precio_Actual": round(precio_act, 2),
+                "Dif_%_vs_Max": round(dif_vs_max, 2),
+                "PE_Actual": round(pe_act, 2),
+                "PEG_Ratio": round(peg, 2) if pd.notna(peg) else np.nan,
+                "Margen_Op_%": round(margen_op, 2),
+                "Crec_EPS_%": round(crec_eps, 2),
+                "Crec_Ventas_%": round(crec_ventas, 2),
+                "Target_WallSt": round(target_ws, 2),
+                "Upside_B5_%": round(upside_b5, 2)
+            })
+            time.sleep(0.01)
+        except Exception:
+            continue
+
+    df_export = pd.DataFrame(registros)
+    if not df_export.empty:
+        df_export.to_csv(CSV_MAESTRO, index=False)
+    return df_export
+
+# ==============================================================================
+# MOTOR MATEMÁTICO LOGIT
+# ==============================================================================
+def calcular_modelo_logit(df_raw):
+    """Aplica los filtros de veto y calcula el ranking Logit a 30 días."""
+    if df_raw is None or df_raw.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    vetadas, aprobadas_idx = [], []
 
     for idx, row in df_raw.iterrows():
-        ticker = str(row.get('Ticker', ''))
-        
-        if ticker in EXCLUIR_TICKERS:
-            vetadas.append({"Ticker": ticker, "Nombre": row.get('Nombre', ''), "Razón": "Activo volátil / Cripto / Apalancado"})
+        t = str(row.get('Ticker', ''))
+        if t in EXCLUIR_TICKERS:
+            vetadas.append({"Ticker": t, "Nombre": row.get('Nombre', ''), "Razón": "Cripto/Apalancado/Volátil"})
             continue
-        if row.get('Precio_Actual', 0) < PRECIO_MINIMO:
-            vetadas.append({"Ticker": ticker, "Nombre": row.get('Nombre', ''), "Razón": f"Precio bajo (<${PRECIO_MINIMO})"})
+        if row.get('Precio_Actual', 0) < 15.0:
+            vetadas.append({"Ticker": t, "Nombre": row.get('Nombre', ''), "Razón": "Precio < $15 USD"})
             continue
-        if row.get('Margen_Op_%', 0) < UMBRAL_MARGEN_OP_MIN:
-            vetadas.append({"Ticker": ticker, "Nombre": row.get('Nombre', ''), "Razón": f"Margen Operativo insuficiente ({row.get('Margen_Op_%', 0):.1f}%)"})
+        if row.get('Margen_Op_%', 0) < 12.0:
+            vetadas.append({"Ticker": t, "Nombre": row.get('Nombre', ''), "Razón": f"Margen Op. bajo ({row.get('Margen_Op_%', 0):.1f}%)"})
             continue
-        if row.get('Crec_Ventas_%', 0) < UMBRAL_CREC_VENTAS_MIN:
-            vetadas.append({"Ticker": ticker, "Nombre": row.get('Nombre', ''), "Razón": f"Ventas sin expansión ({row.get('Crec_Ventas_%', 0):.1f}%)"})
+        if row.get('Crec_Ventas_%', 0) < 5.0:
+            vetadas.append({"Ticker": t, "Nombre": row.get('Nombre', ''), "Razón": f"Ventas estancadas ({row.get('Crec_Ventas_%', 0):.1f}%)"})
             continue
-        if row.get('Crec_EPS_%', 0) < UMBRAL_CREC_EPS_MIN:
-            vetadas.append({"Ticker": ticker, "Nombre": row.get('Nombre', ''), "Razón": f"Contracción en EPS ({row.get('Crec_EPS_%', 0):.1f}%)"})
+        if row.get('Crec_EPS_%', 0) < 0.0:
+            vetadas.append({"Ticker": t, "Nombre": row.get('Nombre', ''), "Razón": f"Contracción en utilidades ({row.get('Crec_EPS_%', 0):.1f}%)"})
             continue
-        if row.get('Upside_B5_%', 0) < UMBRAL_UPSIDE_MIN:
-            vetadas.append({"Ticker": ticker, "Nombre": row.get('Nombre', ''), "Razón": f"Upside consenso bajo ({row.get('Upside_B5_%', 0):.1f}%)"})
+        if row.get('Upside_B5_%', 0) < 5.0:
+            vetadas.append({"Ticker": t, "Nombre": row.get('Nombre', ''), "Razón": f"Upside consenso < 5% ({row.get('Upside_B5_%', 0):.1f}%)"})
             continue
         if pd.isna(row.get('PEG_Ratio')) or row.get('PEG_Ratio', 0) <= 0:
-            vetadas.append({"Ticker": ticker, "Nombre": row.get('Nombre', ''), "Razón": "PEG Ratio no disponible o distorsionado"})
+            vetadas.append({"Ticker": t, "Nombre": row.get('Nombre', ''), "Razón": "PEG distorsionado"})
             continue
 
         aprobadas_idx.append(idx)
@@ -112,14 +182,12 @@ def procesar_modelo_logit(ruta_csv):
     if df_base.empty:
         return pd.DataFrame(), pd.DataFrame(vetadas)
 
-    # 2. Normalización Vectorial (Z-Scores del Universo Aprobado)
-    cols_modelo = ['PEG_Ratio', 'Margen_Op_%', 'Crec_Ventas_%', 'Dif_%_vs_Max', 'Upside_B5_%']
-    for c in cols_modelo:
-        media = df_base[c].mean()
-        desvest = df_base[c].std() if df_base[c].std() > 0 else 1.0
-        df_base[f'z_{c}'] = (df_base[c] - media) / desvest
+    cols = ['PEG_Ratio', 'Margen_Op_%', 'Crec_Ventas_%', 'Dif_%_vs_Max', 'Upside_B5_%']
+    for c in cols:
+        mean_val = df_base[c].mean()
+        std_val = df_base[c].std() if df_base[c].std() > 0 else 1.0
+        df_base[f'z_{c}'] = (df_base[c] - mean_val) / std_val
 
-    # 3. Función Sigmoide Multivariada Logit
     df_base['score_z'] = (
         BETA_0 +
         BETA_1 * df_base['z_PEG_Ratio'] +
@@ -130,123 +198,121 @@ def procesar_modelo_logit(ruta_csv):
     )
     df_base['Probabilidad_Logit'] = 1.0 / (1.0 + np.exp(-df_base['score_z']))
 
-    # Clasificación por Convicción
-    condiciones = [
+    conds = [
         (df_base['Probabilidad_Logit'] >= 0.85),
         (df_base['Probabilidad_Logit'] >= 0.70),
         (df_base['Probabilidad_Logit'] >= 0.55),
         (df_base['Probabilidad_Logit'] >= 0.40)
     ]
-    etiquetas = ["💎 GANGA INSTITUCIONAL", "🟢 Muy Fuerte", "🟡 Atractiva", "⚪ Neutral"]
-    df_base['Clasificacion'] = np.select(condiciones, etiquetas, default="🔴 Descartar")
+    labels = ["💎 GANGA INSTITUCIONAL", "🟢 Muy Fuerte", "🟡 Atractiva", "⚪ Neutral"]
+    df_base['Clasificacion'] = np.select(conds, labels, default="🔴 Descartar")
 
     df_aprobadas = df_base.sort_values(by=['Probabilidad_Logit', 'Margen_Op_%'], ascending=[False, False]).reset_index(drop=True)
     df_vetadas = pd.DataFrame(vetadas)
 
-    # Guardar matriz consolidada para consumo de API o Git
     df_aprobadas.to_csv("logit_data.csv", index=False)
     df_vetadas.to_csv("vetados_quality.csv", index=False)
-
     return df_aprobadas, df_vetadas
 
 # ==============================================================================
-# INTERFAZ GRÁFICA DE USUARIO
+# GESTOR DE DATOS EN MEMORIA / CACHÉ
 # ==============================================================================
-st.title("🧠 SBS Center - Laboratorio Logit Tablero v3.0")
-st.caption("Motor de Asimetría Fundamental a 30 Días | Filtro Anti-Value Traps Integrado")
+@st.cache_data(ttl=14400) # Se recalcula automáticamente cada 4 horas
+def obtener_datos_actualizados():
+    """Verifica la antigüedad del archivo local. Si no existe o tiene >4 horas, lo genera."""
+    necesita_descarga = True
+    
+    # 1. Buscar cualquier export previo en el directorio
+    archivos_existentes = glob.glob("*export*.csv") + glob.glob("tablero*.csv")
+    if archivos_existentes:
+        archivos_existentes.sort(key=os.path.getmtime, reverse=True)
+        mas_reciente = archivos_existentes[0]
+        edad_horas = (time.time() - os.path.getmtime(mas_reciente)) / 3600.0
+        
+        # Si tiene menos de 4 horas, usarlo sin hacer esperar al usuario
+        if edad_horas < 4.0:
+            df_raw = pd.read_csv(mas_reciente)
+            necesita_descarga = False
+    
+    if necesita_descarga:
+        df_raw = construir_tablero_maximo_autonomo()
+
+    return calcular_modelo_logit(df_raw)
+
+# ==============================================================================
+# INTERFAZ STREAMLIT
+# ==============================================================================
+st.title("🧠 SBS Center - Laboratorio Logit 100% Autónomo")
+st.caption("Auto-actualización en tiempo real | Top 15 de Convicción Fundamental a 30 Días")
 st.markdown("---")
 
-archivo_activo = buscar_archivo_export()
-
 with st.sidebar:
-    st.header("⚙️ Origen de Datos")
-    if archivo_activo:
-        st.success(f"Archivo cargado:\n`{archivo_activo}`")
-        st.write(f"Última sync: {datetime.fromtimestamp(os.path.getmtime(archivo_activo)).strftime('%Y-%m-%d %H:%M')}")
+    st.header("🔄 Estado del Sistema")
+    if os.path.exists(CSV_MAESTRO):
+        f_time = datetime.fromtimestamp(os.path.getmtime(CSV_MAESTRO)).strftime('%Y-%m-%d %H:%M')
+        st.success(f"Base de datos activa.\nÚltimo cálculo: {f_time}")
     else:
-        st.error("No se localizó ningún archivo `export.csv` en el directorio.")
+        st.info("Inicializando datos por primera vez...")
 
-    if st.button("🔄 Forzar Recálculo", use_container_width=True):
-        st.cache_data.clear()
-        st.rerun()
+    if st.button("⚡ Forzar Actualización Completa Ahora", use_container_width=True):
+        with st.spinner("Descargando mercado completo en vivo... (tomará ~30s)"):
+            st.cache_data.clear()
+            df_aprobadas, df_vetadas = obtener_datos_actualizados()
+            st.success("¡Base de datos y modelo actualizados!")
+            st.rerun()
 
     st.divider()
     st.markdown("""
-    **Parámetros de Entrada:**
-    * Margen Op. $\ge 12\%$
-    * Crec. Ventas $\ge 5\%$
-    * Horizonte: **30 Días**
-    * TP Anticipado: **+8% a +10%**
+    **Reglas de Ejecución:**
+    * Sin archivos manuales requeridos.
+    * Auto-expiración de caché: **4 Horas**.
+    * Salida anticipada recomendada: **+8% a +10%**.
     """)
 
-if archivo_activo:
-    df_aprobadas, df_vetadas = procesar_modelo_logit(archivo_activo)
+# Carga y renderizado automático
+df_aprobadas, df_vetadas = obtener_datos_actualizados()
 
-    if df_aprobadas is not None and not df_aprobadas.empty:
-        # CONTENEDOR PRINCIPAL: TOP 15 OFICIAL A 30 DÍAS
-        st.markdown("<div class='top15-box'>", unsafe_allow_html=True)
-        st.subheader("🔥 Top 15 Oficial de Convicción Logit (Horizonte 30 Días)")
-        st.write("Selección de mayor asimetría matemática libre de trampas de valor:")
+if df_aprobadas is not None and not df_aprobadas.empty:
+    st.markdown("<div class='top15-box'>", unsafe_allow_html=True)
+    st.subheader("🔥 Top 15 Oficial de Convicción Logit (Horizonte 30 Días)")
+    st.write("Generado automáticamente evaluando calidad operativa, PEG y sobreventa:")
 
-        top15 = df_aprobadas.head(15).copy()
-        top15['Ranking'] = range(1, len(top15) + 1)
+    top15 = df_aprobadas.head(15).copy()
+    top15['Ranking'] = range(1, len(top15) + 1)
 
-        columnas_top15 = [
-            'Ranking', 'Ticker', 'Nombre', 'Sector', 'Clasificacion',
-            'Probabilidad_Logit', 'Precio_Actual', 'Target_WallSt', 
-            'Upside_B5_%', 'PEG_Ratio', 'Margen_Op_%', 'Crec_Ventas_%'
-        ]
+    columnas_top15 = [
+        'Ranking', 'Ticker', 'Nombre', 'Sector', 'Clasificacion',
+        'Probabilidad_Logit', 'Precio_Actual', 'Target_WallSt', 
+        'Upside_B5_%', 'PEG_Ratio', 'Margen_Op_%', 'Crec_Ventas_%'
+    ]
 
-        st.dataframe(
-            top15[columnas_top15].style.format({
-                'Probabilidad_Logit': '{:.2%}',
-                'Precio_Actual': '${:.2f}',
-                'Target_WallSt': '${:.2f}',
-                'Upside_B5_%': '+{:.2f}%',
-                'PEG_Ratio': '{:.2f}x',
-                'Margen_Op_%': '{:.1f}%',
-                'Crec_Ventas_%': '{:.1f}%'
-            }),
-            use_container_width=True,
-            hide_index=True
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
+    st.dataframe(
+        top15[columnas_top15].style.format({
+            'Probabilidad_Logit': '{:.2%}',
+            'Precio_Actual': '${:.2f}',
+            'Target_WallSt': '${:.2f}',
+            'Upside_B5_%': '+{:.2f}%',
+            'PEG_Ratio': '{:.2f}x',
+            'Margen_Op_%': '{:.1f}%',
+            'Crec_Ventas_%': '{:.1f}%'
+        }),
+        use_container_width=True,
+        hide_index=True
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
 
-        # RESUMEN EJECUTIVO
-        c1, c2, c3, c4 = st.columns(4)
-        with c1: st.metric("Candidatas Aprobadas", len(df_aprobadas))
-        with c2: st.metric("Descartadas por Filtro", len(df_vetadas))
-        with c3: st.metric("Gangas (>85% Prob)", len(df_aprobadas[df_aprobadas['Probabilidad_Logit'] >= 0.85]))
-        with c4: st.metric("Margen Op Promedio Top 15", f"{top15['Margen_Op_%'].mean():.1f}%")
+    c1, c2, c3 = st.columns(3)
+    with c1: st.metric("Empresas Calificadas", len(df_aprobadas))
+    with c2: st.metric("Empresas Vetadas (Filtro Sanitario)", len(df_vetadas))
+    with c3: st.metric("Margen Op. Promedio Top 15", f"{top15['Margen_Op_%'].mean():.1f}%")
 
-        # PESTAÑAS DE INSPECCIÓN
-        tab_full, tab_vetadas = st.tabs(["📋 Universo Completo Filtrado", "🛡️ Bitácora de Exclusión (Vetadas)"])
-
-        with tab_full:
-            cols_full = [
-                'Ticker', 'Nombre', 'Sector', 'Clasificacion', 'Probabilidad_Logit',
-                'Precio_Actual', 'Target_WallSt', 'Upside_B5_%', 'PEG_Ratio', 
-                'Margen_Op_%', 'Crec_Ventas_%', 'Dif_%_vs_Max'
-            ]
-            st.dataframe(
-                df_aprobadas[cols_full].style.format({
-                    'Probabilidad_Logit': '{:.2%}',
-                    'Precio_Actual': '${:.2f}',
-                    'Target_WallSt': '${:.2f}',
-                    'Upside_B5_%': '+{:.2f}%',
-                    'PEG_Ratio': '{:.2f}x',
-                    'Margen_Op_%': '{:.1f}%',
-                    'Crec_Ventas_%': '{:.1f}%',
-                    'Dif_%_vs_Max': '{:.1f}%'
-                }),
-                use_container_width=True,
-                hide_index=True
-            )
-
-        with tab_vetadas:
-            st.write("Emisoras del tablero descartadas automáticamente:")
-            st.dataframe(df_vetadas, use_container_width=True, hide_index=True)
-    else:
-        st.warning("No se encontraron activos que cumplan con los filtros de calidad en el archivo actual.")
-else:
-    st.info("Coloca un archivo con el formato `*export.csv` en la raíz de la aplicación para procesar el modelo.")
+    tab1, tab2 = st.tabs(["📋 Universo Completo Calificado", "🛡️ Bitácora de Empresas Vetadas"])
+    with tab1:
+        cols_all = ['Ticker', 'Nombre', 'Sector', 'Clasificacion', 'Probabilidad_Logit', 'Precio_Actual', 'Target_WallSt', 'Upside_B5_%', 'PEG_Ratio', 'Margen_Op_%', 'Crec_Ventas_%', 'Dif_%_vs_Max']
+        st.dataframe(df_aprobadas[cols_all].style.format({
+            'Probabilidad_Logit': '{:.2%}', 'Precio_Actual': '${:.2f}', 'Target_WallSt': '${:.2f}',
+            'Upside_B5_%': '+{:.2f}%', 'PEG_Ratio': '{:.2f}x', 'Margen_Op_%': '{:.1f}%',
+            'Crec_Ventas_%': '{:.1f}%', 'Dif_%_vs_Max': '{:.1f}%'
+        }), use_container_width=True, hide_index=True)
+    with tab2:
+        st.dataframe(df_vetadas, use_container_width=True, hide_index=True)
