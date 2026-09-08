@@ -1,0 +1,35 @@
+name: Actualizacion Automatica Tablero Logit
+
+on:
+  schedule:
+    # Lunes a viernes a las 21:00 UTC (15:00 CDMX, justo tras el cierre de Wall Street)
+    - cron: '0 21 * * 1-5'
+  workflow_dispatch: # Botón para dispararlo manualmente cuando tú quieras
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clonar Repositorio
+        uses: actions/checkout@v3
+
+      - name: Configurar Python
+        uses: setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Instalar Dependencias
+        run: |
+          pip install pandas numpy yfinance streamlit
+
+      - name: Ejecutar Extractor y Recálculo
+        run: |
+          python -c "import app; app.obtener_datos_actualizados()"
+
+      - name: Guardar y Hacer Push a GitHub
+        run: |
+          git config --global user.name "SBS Quant Bot"
+          git config --global user.email "bot@sbsquant.com"
+          git add tablero_export_auto.csv logit_data.csv vetados_quality.csv
+          git commit -m "Auto-actualización Tablero y Logit [skip ci]" || echo "Sin cambios nuevos"
+          git push
